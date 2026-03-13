@@ -1,6 +1,6 @@
-# Event Hub API Service - Spring Boot on Azure
+# API Management Infrastructure - Resource Group Setup
 
-**Simple Terraform setup for Spring Boot + Event Hub on Azure App Service**
+**Simple Terraform setup to create Azure Resource Group for API Management**
 
 ## What Gets Created
 

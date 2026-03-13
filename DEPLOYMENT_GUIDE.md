@@ -1,15 +1,12 @@
-# Azure Terraform App Service Deployment
+# Azure Resource Group Deployment Guide
 
-This repository contains Infrastructure-as-Code (IaC) for deploying an Azure App Service with automated RBAC configuration and GitHub Actions CI/CD pipeline.
+This repository contains Infrastructure-as-Code (IaC) for deploying an Azure Resource Group ready for API Management services using Terraform and GitHub Actions CI/CD pipeline.
 
 ## 📋 Architecture
 
 ```
 Azure Resource Group
-├── App Service Plan (Linux)
-├── App Service (with Managed Identity)
-├── RBAC Role Assignment (Contributor)
-└── Diagnostic Settings (optional)
+└── rg-api-mgt (Ready for app deployment)
 ```
 
 ## 🚀 Quick Start
@@ -23,28 +20,11 @@ Azure Resource Group
 
 ### Local Deployment
 
-#### 1. Initialize Terraform Backend
-
-First, create an Azure Storage Account for Terraform state:
+#### 1. Get Your Subscription ID
 
 ```bash
-# Set variables
-$resourceGroup = "rg-terraform-state"
-$storageAccount = "tfstate$(Get-Random -Minimum 10000 -Maximum 99999)"
-$location = "eastus"
-
-# Create resource group and storage account
-az group create --name $resourceGroup --location $location
-az storage account create \
-  --resource-group $resourceGroup \
-  --name $storageAccount \
-  --sku Standard_LRS \
-  --kind StorageAccountV2
-
-# Create container
-az storage container create \
-  --name tfstate \
-  --account-name $storageAccount
+az login
+az account show --query id -o tsv
 ```
 
 #### 2. Configure Variables
@@ -52,29 +32,20 @@ az storage container create \
 Edit `infra/terraform.tfvars`:
 
 ```hcl
-subscription_id          = "YOUR_SUBSCRIPTION_ID"
-environment              = "dev"
-location                 = "eastus"
-app_name                 = "myapp"
-resource_group_name      = "rg-myapp-dev"
-app_service_sku          = "B1"
-app_service_always_on    = false
-docker_image_name        = "nginx:latest"
-rbac_role_name           = "Contributor"
+subscription_id     = "YOUR_SUBSCRIPTION_ID"
+resource_group_name = "rg-api-mgt"
+location            = "eastus"
+environment         = "dev"
 ```
 
-#### 3. Initialize and Deploy
+#### 3. Deploy
 
 ```bash
 # Navigate to infrastructure directory
 cd infra
 
 # Initialize Terraform
-terraform init \
-  -backend-config="resource_group_name=rg-terraform-state" \
-  -backend-config="storage_account_name=YOUR_STORAGE_ACCOUNT" \
-  -backend-config="container_name=tfstate" \
-  -backend-config="key=terraform.tfstate"
+terraform init
 
 # Plan deployment
 terraform plan -out=tfplan
@@ -83,20 +54,197 @@ terraform plan -out=tfplan
 terraform apply tfplan
 ```
 
+#### 4. Get Resource Group Details
+
+```bash
+terraform output resource_group_name
+terraform output resource_group_id
+terraform output location
+```
+
 ### GitHub Actions Deployment
 
-#### 1. Create Service Principal
+#### 1. Create Azure Service Principal
 
 ```bash
 az ad sp create-for-rbac \
-  --name "github-actions-sp" \
+  --name "github-api-mgt-sp" \
   --role Contributor \
   --scopes /subscriptions/YOUR_SUBSCRIPTION_ID
 ```
 
-#### 2. Configure GitHub Secrets
+Output will be:
 
-Add these secrets to your GitHub repository (Settings > Secrets and variables > Actions):
+```json
+{
+  "appId": "CLIENT_ID",
+  "displayName": "github-api-mgt-sp",
+  "password": "CLIENT_SECRET",
+  "tenant": "TENANT_ID"
+}
+```
+
+#### 2. Add GitHub Secrets
+
+Go to: **Repository Settings** → **Secrets and variables** → **Actions**
+
+Add these secrets:
+
+- `AZURE_CLIENT_ID` = appId
+- `AZURE_CLIENT_SECRET` = password
+- `AZURE_TENANT_ID` = tenant
+- `AZURE_SUBSCRIPTION_ID` = Your subscription ID
+
+#### 3. Push to Main Branch
+
+The workflow will automatically run:
+
+```bash
+git add .
+git commit -m "Deploy resource group"
+git push origin main
+```
+
+Check **Actions** tab to see deployment progress.
+
+## 📊 Workflow Steps
+
+1. **Terraform Validate** - Checks syntax and structure
+2. **Terraform Plan** - Shows what will be created
+3. **Terraform Apply** - Creates the resource group
+4. **Get Outputs** - Displays resource group details
+
+## 🛠️ Management
+
+### View Deployment
+
+```bash
+# List all resources
+az group show --name rg-api-mgt
+
+# List resources in group
+az resource list --resource-group rg-api-mgt
+```
+
+### Update Configuration
+
+Edit `infra/terraform.tfvars` and push:
+
+```bash
+git add infra/terraform.tfvars
+git commit -m "Update resource group settings"
+git push origin main
+```
+
+GitHub Actions will automatically re-deploy.
+
+### Destroy Resources
+
+```bash
+cd infra
+terraform destroy
+```
+
+Or via GitHub Actions by running manually and destroying.
+
+## 📝 Next Steps
+
+After resource group is created:
+
+1. **Deploy App Service Plan**
+
+   ```bash
+   # In your app repository
+   az appservice plan create \
+     --name app-plan \
+     --resource-group rg-api-mgt \
+     --sku B1 \
+     --is-linux
+   ```
+
+2. **Deploy Web Application**
+
+   ```bash
+   az webapp create \
+     --name myapp \
+     --resource-group rg-api-mgt \
+     --plan app-plan \
+     --runtime "JAVA|17-java17"
+   ```
+
+3. **Configure Application Settings**
+   ```bash
+   az webapp config appsettings set \
+     --resource-group rg-api-mgt \
+     --name myapp \
+     --settings WEBSITES_PORT=8080
+   ```
+
+## ❌ Troubleshooting
+
+**Azure Login Failed**
+
+```bash
+az login
+az account set --subscription YOUR_SUBSCRIPTION_ID
+```
+
+**Service Principal Issues**
+
+```bash
+# Verify credentials
+az login --service-principal \
+  --username CLIENT_ID \
+  --password CLIENT_SECRET \
+  --tenant TENANT_ID
+```
+
+**Terraform State Error**
+
+```bash
+rm -rf .terraform .terraform.lock.hcl
+terraform init
+```
+
+**Resource Group Already Exists**
+
+```bash
+# Import existing resource group
+terraform import azurerm_resource_group.main /subscriptions/SUB_ID/resourceGroups/rg-api-mgt
+```
+
+**GitHub Actions Fails**
+
+- Check **Actions** tab for error logs
+- Verify all 4 secrets are set correctly
+- Ensure service principal has Contributor role
+
+## 📖 Workflow File
+
+The workflow is defined in: `.github/workflows/eventhub-api-service-deploy.yml`
+
+Key triggers:
+
+- Push to `main` branch → Auto deploy
+- Pull Request → Plan only
+- Manual trigger → Run workflow
+
+## 🔐 Security Best Practices
+
+1. ✅ Never commit secrets to Git
+2. ✅ Use GitHub Secrets for sensitive data
+3. ✅ Rotate service principal credentials regularly
+4. ✅ Limit service principal scope to specific subscription
+5. ✅ Use RBAC roles with least privilege
+
+## 📞 Support
+
+For issues:
+
+1. Check GitHub Actions logs
+2. Review Terraform output
+3. Check Azure Portal resource group status
+4. Verify Azure CLI authentication
 
 ```
 AZURE_CREDENTIALS        = <entire output from service principal creation>

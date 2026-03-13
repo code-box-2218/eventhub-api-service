@@ -1,4 +1,4 @@
-name: Deploy Event Hub API Service
+name: Deploy API Management Resource Group
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - "infra/**"
-      - ".github/workflows/eventhub-api-service-deploy.yml"
+      - ".github/workflows/rg-api-mgt.yml"
   pull_request:
     branches:
       - main
@@ -92,11 +92,9 @@ jobs:
           cd infra
           terraform plan -no-color \
             -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            -var="app_name=eventhub-api-service" \
-            -var="resource_group_name=rg-eventhub-api" \
+            -var="resource_group_name=rg-api-mgt" \
             -var="location=eastus" \
-            -var="app_service_sku=B1" \
-            -var="enable_eventhub=true" \
+            -var="environment=dev" \
             -out=tfplan
         continue-on-error: true
 
@@ -110,7 +108,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '## 📋 Terraform Plan\n```\nEvent Hub API Service Deployment\n- App Service: app-eventhub-api\n- Event Hub: evh-eventhub-api\n- Location: eastus\n- SKU: B1\n```\nReview and merge to deploy.'
+              body: '## 📋 Terraform Plan\n```\nResource Group: rg-api-mgt\nLocation: eastus\nEnvironment: dev\n```\nReview and merge to deploy.'
             });
 
   terraform-apply:
@@ -155,45 +153,33 @@ jobs:
           cd infra
           terraform apply -auto-approve \
             -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            -var="app_name=eventhub-api-service" \
-            -var="resource_group_name=rg-eventhub-api" \
+            -var="resource_group_name=rg-api-mgt" \
             -var="location=eastus" \
-            -var="app_service_sku=B1" \
-            -var="enable_eventhub=true"
+            -var="environment=dev"
 
       - name: Get Deployment Outputs
         id: outputs
         run: |
           cd infra
-          APP_URL=$(terraform output -raw app_service_url)
-          APP_NAME=$(terraform output -raw app_service_name)
-          EVENTHUB=$(terraform output -raw eventhub_name)
+          RG_NAME=$(terraform output -raw resource_group_name)
+          RG_ID=$(terraform output -raw resource_group_id)
+          LOCATION=$(terraform output -raw location)
 
-          echo "app_url=$APP_URL" >> $GITHUB_OUTPUT
-          echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
-          echo "eventhub=$EVENTHUB" >> $GITHUB_OUTPUT
+          echo "rg_name=$RG_NAME" >> $GITHUB_OUTPUT
+          echo "rg_id=$RG_ID" >> $GITHUB_OUTPUT
+          echo "location=$LOCATION" >> $GITHUB_OUTPUT
 
-          echo "## 🚀 Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Resource Group Created" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**App Service:** $APP_NAME" >> $GITHUB_STEP_SUMMARY
-          echo "**URL:** $APP_URL" >> $GITHUB_STEP_SUMMARY
-          echo "**Event Hub:** $EVENTHUB" >> $GITHUB_STEP_SUMMARY
+          echo "**Resource Group:** $RG_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "**Location:** $LOCATION" >> $GITHUB_STEP_SUMMARY
+          echo "**ID:** $RG_ID" >> $GITHUB_STEP_SUMMARY
 
       - name: Verify Deployment
         run: |
-          echo "Verifying Event Hub API Service..."
-          APP_URL="${{ steps.outputs.outputs.app_url }}"
-
-          for i in {1..10}; do
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL" || echo "000")
-            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ] || [ "$HTTP_CODE" = "502" ]; then
-              echo "✅ App Service is responding (HTTP $HTTP_CODE)"
-              exit 0
-            fi
-            echo "⏳ Attempt $i/10: Waiting for app to be ready..."
-            sleep 6
-          done
-          echo "⚠️ App Service taking longer to start (this is normal)"
+          echo "Verifying Resource Group..."
+          RG_NAME="${{ steps.outputs.outputs.rg_name }}"
+          echo "✅ Resource Group '$RG_NAME' created successfully"
 
   deployment-summary:
     name: "Deployment Summary"
@@ -207,12 +193,12 @@ jobs:
       - name: Success Notification
         if: needs.terraform-apply.result == 'success'
         run: |
-          echo "✅ Event Hub API Service deployment completed successfully!"
+          echo "✅ Resource Group created successfully!"
           echo ""
           echo "📝 Next Steps:"
-          echo "1. Deploy your Spring Boot application"
-          echo "2. Check the deployment outputs above for App URL and Event Hub name"
-          echo "3. Managed Identity is configured for Event Hub access"
+          echo "1. Deploy your web application from your app repository"
+          echo "2. Use resource group: rg-api-mgt"
+          echo "3. Create App Service Plan and App Service in this resource group"
 
       - name: Failure Notification
         if: needs.terraform-apply.result == 'failure'

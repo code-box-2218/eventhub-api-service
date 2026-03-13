@@ -1,19 +1,14 @@
-output "app_service_url" {
-  description = "App Service URL"
-  value       = "https://${azurerm_linux_web_app.main.default_hostname}"
+output "resource_group_name" {
+  description = "Resource Group Name"
+  value       = azurerm_resource_group.main.name
 }
 
-output "app_service_name" {
-  description = "App Service Name"
-  value       = azurerm_linux_web_app.main.name
+output "resource_group_id" {
+  description = "Resource Group ID"
+  value       = azurerm_resource_group.main.id
 }
 
-output "eventhub_namespace" {
-  description = "Event Hub Namespace"
-  value       = var.enable_eventhub ? azurerm_eventhub_namespace.main[0].name : null
-}
-
-output "eventhub_name" {
-  description = "Event Hub Name"
-  value       = var.enable_eventhub ? azurerm_eventhub.main[0].name : null
+output "location" {
+  description = "Resource Group Location"
+  value       = azurerm_resource_group.main.location
 }
