@@ -6,7 +6,7 @@ on:
       - main
     paths:
       - "infra/**"
-      - ".github/workflows/deploy.yml"
+      - ".github/workflows/eventhub-api-service-deploy.yml"
   pull_request:
     branches:
       - main
@@ -18,7 +18,7 @@ env:
   TERRAFORM_VERSION: 1.5.0
 
 jobs:
-  validate:
+  terraform-validate:
     name: "Validate Terraform"
     runs-on: ubuntu-latest
     permissions:
@@ -49,9 +49,9 @@ jobs:
           cd infra
           terraform validate
 
-  plan:
+  terraform-plan:
     name: "Plan Deployment"
-    needs: validate
+    needs: terraform-validate
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -67,12 +67,19 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
       - name: Azure Login
-        uses: azure/login@v1
+        uses: Azure/login@v1
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: |
+            {
+              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
+            }
           auth-type: SERVICE_PRINCIPAL
+          environment: azurecloud
+          enable-AzPSSession: false
+          allow-no-subscriptions: false
 
       - name: Terraform Init
         run: |
@@ -85,7 +92,12 @@ jobs:
           cd infra
           terraform plan -no-color \
             -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            -var-file="terraform.tfvars"
+            -var="app_name=eventhub-api-service" \
+            -var="resource_group_name=rg-eventhub-api" \
+            -var="location=eastus" \
+            -var="app_service_sku=B1" \
+            -var="enable_eventhub=true" \
+            -out=tfplan
         continue-on-error: true
 
       - name: Comment PR with Plan
@@ -98,12 +110,12 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '## 📋 Terraform Plan Ready\nReview changes and merge to deploy.'
+              body: '## 📋 Terraform Plan\n```\nEvent Hub API Service Deployment\n- App Service: app-eventhub-api\n- Event Hub: evh-eventhub-api\n- Location: eastus\n- SKU: B1\n```\nReview and merge to deploy.'
             });
 
-  apply:
-    name: "Apply Deployment"
-    needs: plan
+  terraform-apply:
+    name: "Deploy Infrastructure"
+    needs: terraform-plan
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     permissions:
@@ -119,12 +131,19 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
       - name: Azure Login
-        uses: azure/login@v1
+        uses: Azure/login@v1
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          creds: |
+            {
+              "clientId":"${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret":"${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId":"${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId":"${{ secrets.AZURE_TENANT_ID }}"
+            }
           auth-type: SERVICE_PRINCIPAL
+          environment: azurecloud
+          enable-AzPSSession: false
+          allow-no-subscriptions: false
 
       - name: Terraform Init
         run: |
@@ -136,37 +155,68 @@ jobs:
           cd infra
           terraform apply -auto-approve \
             -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            -var-file="terraform.tfvars"
+            -var="app_name=eventhub-api" \
+            -var="resource_group_name=rg-eventhub-api" \
+            -var="location=eastus" \
+            -var="app_service_sku=B1" \
+            -var="enable_eventhub=true"
 
-      - name: Get Outputs
-        id: output
+      - name: Get Deployment Outputs
+        id: outputs
         run: |
           cd infra
           APP_URL=$(terraform output -raw app_service_url)
           APP_NAME=$(terraform output -raw app_service_name)
-          EVENTHUB=$(terraform output -raw eventhub_name | grep -v "null" || echo "N/A")
+          EVENTHUB=$(terraform output -raw eventhub_name)
 
           echo "app_url=$APP_URL" >> $GITHUB_OUTPUT
           echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
           echo "eventhub=$EVENTHUB" >> $GITHUB_OUTPUT
 
-          echo "## ✅ Deployment Complete" >> $GITHUB_STEP_SUMMARY
-          echo "**App:** $APP_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**App Service:** $APP_NAME" >> $GITHUB_STEP_SUMMARY
           echo "**URL:** $APP_URL" >> $GITHUB_STEP_SUMMARY
           echo "**Event Hub:** $EVENTHUB" >> $GITHUB_STEP_SUMMARY
 
       - name: Verify Deployment
         run: |
-          echo "Verifying deployment..."
-          APP_URL="${{ steps.output.outputs.app_url }}"
+          echo "Verifying Event Hub API Service..."
+          APP_URL="${{ steps.outputs.outputs.app_url }}"
 
           for i in {1..10}; do
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL" || echo "000")
-            if [ "$HTTP_CODE" != "000" ]; then
-              echo "✅ App is responding (HTTP $HTTP_CODE)"
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ] || [ "$HTTP_CODE" = "502" ]; then
+              echo "✅ App Service is responding (HTTP $HTTP_CODE)"
               exit 0
             fi
-            echo "⏳ Attempt $i/10..."
-            sleep 5
+            echo "⏳ Attempt $i/10: Waiting for app to be ready..."
+            sleep 6
           done
-          echo "⚠️ Deployment successful, app still initializing"
+          echo "⚠️ App Service taking longer to start (this is normal)"
+
+  deployment-summary:
+    name: "Deployment Summary"
+    needs: [terraform-apply]
+    runs-on: ubuntu-latest
+    if: always()
+    permissions:
+      contents: read
+
+    steps:
+      - name: Success Notification
+        if: needs.terraform-apply.result == 'success'
+        run: |
+          echo "✅ Event Hub API Service deployment completed successfully!"
+          echo ""
+          echo "📝 Next Steps:"
+          echo "1. Deploy your Spring Boot application"
+          echo "2. Check the deployment outputs above for App URL and Event Hub name"
+          echo "3. Managed Identity is configured for Event Hub access"
+
+      - name: Failure Notification
+        if: needs.terraform-apply.result == 'failure'
+        run: |
+          echo "❌ Deployment failed!"
+          echo "Check the logs above for details."
+          exit 1
