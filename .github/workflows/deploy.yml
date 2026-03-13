@@ -155,7 +155,7 @@ jobs:
           cd infra
           terraform apply -auto-approve \
             -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            -var="app_name=eventhub-api" \
+            -var="app_name=eventhub-api-service" \
             -var="resource_group_name=rg-eventhub-api" \
             -var="location=eastus" \
             -var="app_service_sku=B1" \
