@@ -92,7 +92,7 @@ jobs:
           cd infra
           terraform plan -no-color \
             -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            -var="app_name=eventhub-api" \
+            -var="app_name=eventhub-api-service" \
             -var="resource_group_name=rg-eventhub-api" \
             -var="location=eastus" \
             -var="app_service_sku=B1" \
@@ -110,7 +110,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: '## 📋 Terraform Plan\n```\nEvent Hub API Service Deployment\n- App Service: app-eventhub-api\n- Event Hub: evh-eventhub-api\n- Location: eastus\n- SKU: B1\n```\nReview and merge to deploy.'
+              body: '## 📋 Terraform Plan\n```\nEvent Hub API Service Deployment\n- App Service: app-eventhub-api-service\n- Event Hub: evh-eventhub-api-service\n- Location: eastus\n- SKU: B1\n```\nReview and merge to deploy.''
             });
 
   terraform-apply:
@@ -155,7 +155,7 @@ jobs:
           cd infra
           terraform apply -auto-approve \
             -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
-            -var="app_name=eventhub-api" \
+            -var="app_name=eventhub-api-service" \
             -var="resource_group_name=rg-eventhub-api" \
             -var="location=eastus" \
             -var="app_service_sku=B1" \
